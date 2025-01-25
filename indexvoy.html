@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trip Budgeting App</title>
+    <style>
+        #spinner, #searchSpinner {
+            display: none;
+            margin: 20px auto;
+            border: 6px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 6px solid #3498db;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        h3 {
+            margin-top: 20px;
+        }
+
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        li {
+            margin: 5px 0;
+            font-size: 16px;
+        }
+
+        p {
+            margin: 10px 0;
+        }
+
+        button {
+            cursor: pointer;
+            padding: 10px 15px;
+            font-size: 16px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #2874a6;
+        }
+
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+
+        #status, #searchStatus {
+            font-style: italic;
+            color: #7f8c8d;
+        }
+    </style>
+</head>
+<body>
+    <h1>Trip Budgeting App</h1>
+
+    <div>
+        <h2>Individual Contribution Chart</h2>
+        <img id="contributionChart" src="data:image/png;base64,{{ contribution_chart }}" alt="Individual Contribution Chart">
+    </div>
+
+    <div>
+        <h2>Due Amounts Chart</h2>
+        <img id="dueChart" src="data:image/png;base64,{{ due_chart }}" alt="Due Amounts Chart">
+    </div>
+
+    <div>
+        <h2>Expense Category Chart</h2>
+        <img id="categoryChart" src="data:image/png;base64,{{ category_chart }}" alt="Expense Category Chart">
+    </div>
+
+    <div>
+        <h2>Chat History</h2>
+        <ul id="chatHistory">
+            {% for message in chat_history %}
+            <li>{{ message }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <div>
+        <h2>Total Expenditure</h2>
+        <p id="totalExpenditure">₹{{ total_expenditure }}</p>
+    </div>
+
+    <div>
+        <h2>Voice Input</h2>
+        <button id="recordButton">🎤 Record</button>
+        <p id="status">Press the button and speak</p>
+        <div id="spinner"></div>
+    </div>
+
+    <div>
+        <h2>Search Chat History</h2>
+        <button id="searchRecordButton">🎤 Search by Voice</button>
+        <p id="searchStatus">Press the button and speak your query</p>
+        <div id="searchSpinner"></div>
+        <div id="searchResults"></div>
+    </div>
+
+    <script>
+        const recordButton = document.getElementById('recordButton');
+        const status = document.getElementById('status');
+        const spinner = document.getElementById('spinner');
+        const chatHistory = document.getElementById('chatHistory');
+        const contributionChart = document.getElementById('contributionChart');
+        const dueChart = document.getElementById('dueChart');
+        const categoryChart = document.getElementById('categoryChart');
+        const totalExpenditure = document.getElementById('totalExpenditure');
+        const searchRecordButton = document.getElementById('searchRecordButton');
+        const searchStatus = document.getElementById('searchStatus');
+        const searchSpinner = document.getElementById('searchSpinner');
+        const searchResults = document.getElementById('searchResults');
+
+        let mediaRecorder;
+        let audioChunks = [];
+
+        // Function to handle recording and submission for contributions
+        recordButton.addEventListener('click', async () => {
+            if (!mediaRecorder) {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    audioChunks = [];
+
+                    const formData = new FormData();
+                    formData.append('audio', audioBlob);
+
+                    status.textContent = 'Uploading audio...';
+                    spinner.style.display = 'block';
+
+                    try {
+                        const response = await fetch('/upload_audio', {
+                            method: 'POST',
+                            body: formData,
+                        });
+
+                        const data = await response.json();
+                        status.textContent = data.message;
+                        spinner.style.display = 'none';
+
+                        // Update chat history
+                        chatHistory.innerHTML = data.chat_history.map(message => `<li>${message}</li>`).join('');
+
+                        // Update charts
+                        contributionChart.src = `data:image/png;base64,${data.contribution_chart}`;
+                        dueChart.src = `data:image/png;base64,${data.due_chart}`;
+                        categoryChart.src = `data:image/png;base64,${data.category_chart}`;
+
+                        // Update total expenditure
+                        totalExpenditure.textContent = `₹${data.total_expenditure}`;
+                    } catch (error) {
+                        status.textContent = 'Error uploading audio.';
+                        spinner.style.display = 'none';
+                        console.error('Error:', error);
+                    }
+                };
+            }
+
+            if (mediaRecorder.state === 'inactive') {
+                mediaRecorder.start();
+                status.textContent = 'Recording...';
+                recordButton.textContent = '⏹ Stop';
+            } else {
+                mediaRecorder.stop();
+                status.textContent = 'Processing audio...';
+                recordButton.textContent = '🎤 Record';
+            }
+        });
+
+        // Function to handle recording and submission for search queries
+        let searchMediaRecorder;
+        let searchAudioChunks = [];
+
+        searchRecordButton.addEventListener('click', async () => {
+            if (!searchMediaRecorder) {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                searchMediaRecorder = new MediaRecorder(stream);
+
+                searchMediaRecorder.ondataavailable = (event) => {
+                    searchAudioChunks.push(event.data);
+                };
+
+                searchMediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(searchAudioChunks, { type: 'audio/wav' });
+                    searchAudioChunks = [];
+
+                    const formData = new FormData();
+                    formData.append('audio', audioBlob);
+
+                    searchStatus.textContent = 'Uploading query...';
+                    searchSpinner.style.display = 'block';
+
+                    try {
+                        const response = await fetch('/search', {
+                            method: 'POST',
+                            body: formData,
+                        });
+
+                        const data = await response.json();
+                        searchSpinner.style.display = 'none';
+
+                        if (data.error) {
+                            searchResults.innerHTML = `<p>Error: ${data.error}</p>`;
+                        } else {
+                            searchResults.innerHTML = `
+                                <h3>Search Results</h3>
+                                <ul>
+                                    ${data.results.map(entry => `<li>${entry}</li>`).join('')}
+                                </ul>
+                            `;
+                        }
+                    } catch (error) {
+                        searchStatus.textContent = 'Error uploading query.';
+                        searchSpinner.style.display = 'none';
+                        console.error('Error:', error);
+                    }
+                };
+            }
+
+            if (searchMediaRecorder.state === 'inactive') {
+                searchMediaRecorder.start();
+                searchStatus.textContent = 'Recording...';
+                searchRecordButton.textContent = '⏹ Stop';
+            } else {
+                searchMediaRecorder.stop();
+                searchStatus.textContent = 'Processing query...';
+                searchRecordButton.textContent = '🎤 Search by Voice';
+            }
+        });
+    </script>
+</body>
+</html>
